@@ -127,6 +127,50 @@ Implement `store.Store` and run it against `runStoreSuite` in
 `internal/store/store_test.go` — the same suite both existing implementations
 pass. That's what keeps their semantics aligned.
 
+**Example:** start from `internal/store/memory.go`, which implements every
+method with no dependencies. The compile-time assertion catches a missing
+method before the suite runs:
+
+```go
+// internal/store/mystore.go
+package store
+
+// MyStore is a Store backed by <whatever>.
+type MyStore struct{ /* ... */ }
+
+var _ Store = (*MyStore)(nil)
+
+func NewMyStore(dsn string) (*MyStore, error) { /* ... */ }
+```
+
+Then point the shared suite at it. The factory returns a fresh, empty store per
+test, so use a throwaway database or `t.TempDir()`:
+
+```go
+// internal/store/mystore_test.go
+package store_test
+
+import (
+	"testing"
+
+	"github.com/soroworks/soroforge/internal/store"
+	"github.com/stretchr/testify/require"
+)
+
+func TestMyStore(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T) store.Store {
+		s, err := store.NewMyStore(t.TempDir())
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		return s
+	})
+}
+```
+
+Finally, teach `store.Open` (and `NewMigrator`, if the backend brings its own
+schema) which `DATABASE_URL` belongs to it, and add the backend to the table
+above so the production column stays accurate.
+
 ### Adding a CLI command
 
 Add a `newXxxCmd()` in [`cmd/soroforge/commands.go`](cmd/soroforge/commands.go)
