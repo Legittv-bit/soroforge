@@ -129,9 +129,53 @@ pass. That's what keeps their semantics aligned.
 
 ### Adding a CLI command
 
-Add a `newXxxCmd()` in [`cmd/soroforge/commands.go`](cmd/soroforge/commands.go)
+Add a `newXxxCmd()` in [`cmd/soroforge/root.go`](cmd/soroforge/root.go)
 and register it in `newRootCmd`. If it does anything a CI pipeline would want,
 add the matching HTTP handler too, and have both call the same service method.
+
+**Example:** the shape [`cmd/soroforge/status.go`](cmd/soroforge/status.go)
+uses — one file per command, constructed by a `newXxxCmd()`:
+
+```go
+// cmd/soroforge/drift.go
+package main
+
+import (
+	"github.com/soroworks/soroforge/internal/deploy"
+	"github.com/spf13/cobra"
+)
+
+func newDriftCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "drift <alias>",
+		Short: "Report drift between the ledger and the recorded state",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			a, err := newApp(cmd.Context(), appOptions{})
+			if err != nil {
+				return err
+			}
+			defer a.Close()
+
+			result, err := a.service.Status(cmd.Context(), deploy.StatusRequest{
+				Alias:   args[0],
+				Network: flags.network,
+			})
+			if err != nil {
+				return err
+			}
+			return printStatus(result)
+		},
+	}
+	attachAliasCompletion(cmd)
+	return cmd
+}
+```
+
+Then add `newDriftCmd(),` to the `cmd.AddCommand(...)` list in `newRootCmd`.
+If CI should be able to call it, give it a route in `internal/api/api.go` and a
+handler that calls the same `a.service` method — neither surface owns logic of
+its own.
 
 ### Adding a migration
 
