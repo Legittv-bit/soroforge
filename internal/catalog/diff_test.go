@@ -1,9 +1,11 @@
 package catalog
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func fn(name string, out string, inputs ...Param) Function {
@@ -122,4 +124,58 @@ func TestFunctionSignature(t *testing.T) {
 	assert.Equal(t, "fn noop()", FunctionSignature(fn("noop", "")))
 	assert.Equal(t, "fn transfer(from: Address, to: Address, amount: i128) -> Result<(), Error>",
 		FunctionSignature(fn("transfer", "Result<(), Error>", p("from", "Address"), p("to", "Address"), p("amount", "i128"))))
+}
+
+// TestChangeJSONRoundTrip verifies that Change marshals and unmarshals without
+// data loss, including the omitempty Previous field (#369).
+func TestChangeJSONRoundTrip(t *testing.T) {
+	t.Run("all fields set", func(t *testing.T) {
+		orig := Change{
+			Kind:      Changed,
+			Item:      "fn",
+			Name:      "transfer",
+			Signature: "fn transfer(to: Address, amount: i128) -> Result<(), Error>",
+			Previous:  "fn transfer(to: Address)",
+			Breaking:  true,
+		}
+		data, err := json.Marshal(orig)
+		require.NoError(t, err)
+		var got Change
+		require.NoError(t, json.Unmarshal(data, &got))
+		assert.Equal(t, orig, got)
+	})
+
+	t.Run("Previous omitted when empty", func(t *testing.T) {
+		orig := Change{Kind: Added, Item: "fn", Name: "reset", Signature: "fn reset()"}
+		data, err := json.Marshal(orig)
+		require.NoError(t, err)
+		assert.NotContains(t, string(data), "previous")
+		var got Change
+		require.NoError(t, json.Unmarshal(data, &got))
+		assert.Equal(t, orig, got)
+	})
+}
+
+func TestFunctionSignatureWithOnlyInputsOrOutputs(t *testing.T) {
+	cases := []struct {
+		name string
+		fn   Function
+		want string
+	}{
+		{
+			name: "no inputs with a return value",
+			fn:   fn("count", "u32"),
+			want: "fn count() -> u32",
+		},
+		{
+			name: "nested input type without a return value",
+			fn:   fn("record", "", p("entries", "Vec<Option<Address>>")),
+			want: "fn record(entries: Vec<Option<Address>>)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, FunctionSignature(tc.fn))
+		})
+	}
 }
